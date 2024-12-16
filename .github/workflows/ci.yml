@@ -6,9 +6,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install ALSA development package
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
       - name: Build
         run: cargo build --release
+
       - name: Test
         run: cargo test
