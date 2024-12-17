@@ -1,6 +1,9 @@
 mod ui;
-mod environment;
+use ui::UIPlugin;
 mod agent;
+
+mod environment;
+use environment::EnvironmentPlugin;
 
 use bevy::{
     core::FrameCount,
@@ -29,6 +32,8 @@ fn main() {
             }),
             LogDiagnosticsPlugin::default(),
             FrameTimeDiagnosticsPlugin,
+            EnvironmentPlugin,
+            UIPlugin
         ))
         .add_systems(Startup, setup)
         .add_systems(Update, (make_visible, exit_game))
