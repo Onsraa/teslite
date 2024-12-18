@@ -1,5 +1,15 @@
 use bevy::prelude::*;
 
+const ACCELERATION_VALUE: f32 = 5.0;
+const ROTATION_VALUE: f32 = 5.0;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TransmissionMode {
+    Park,
+    Drive,
+    Reverse,
+}
+
 #[derive(Component)]
 pub struct CarPhysics {
     pub speed: f32,
@@ -18,7 +28,6 @@ pub struct CarPhysics {
     // Pédales
     pub accelerator: f32,        // entre 0 et 1
     pub brake: f32,              // entre 0 et 1
-    pub idle_speed: f32,         // vitesse "ralenti" avec pédales relâchées
 
     // Paramètres de ramp
     pub accel_ramp_up: f32,
@@ -29,6 +38,11 @@ pub struct CarPhysics {
     // Forces
     pub max_acceleration: f32,
     pub max_braking: f32,
+
+    pub mode: TransmissionMode,
+
+    pub idle_speed_forward: f32,
+    pub idle_speed_reverse: f32,
 }
 
 fn update_car_physics(time: Res<Time>, mut query: Query<(&mut Transform, &mut CarPhysics)>) {
@@ -43,44 +57,83 @@ fn update_car_physics(time: Res<Time>, mut query: Query<(&mut Transform, &mut Ca
             physics.steering_angle += max_angle_change * angle_diff.signum();
         }
 
-        // Calcul de l'accélération
-        let mut accel = physics.accelerator * physics.max_acceleration
-            - physics.brake * physics.max_braking;
+        // Déterminer l'idle_speed actuel selon le mode
+        let idle_speed = match physics.mode {
+            TransmissionMode::Park => 0.0,
+            TransmissionMode::Drive => physics.idle_speed_forward,
+            TransmissionMode::Reverse => physics.idle_speed_reverse,
+        };
 
-        // Si ni frein ni accélérateur, on se rapproche de idle_speed
-        if physics.accelerator == 0.0 && physics.brake == 0.0 {
-            if physics.speed < physics.idle_speed {
-                // Accélère doucement pour remonter vers idle_speed
-                accel = 1.0; // une petite valeur pour tendre vers idle_speed
-            } else if physics.speed > physics.idle_speed {
-                // Décélère doucement (friction)
-                accel = -1.0;
+        let mut accel = 0.0;
+
+        if physics.mode == TransmissionMode::Park {
+            // En mode Park, on force la voiture à s'arrêter
+            physics.speed = 0.0;
+            accel = 0.0;
+        } else {
+            // Mode Drive ou Reverse
+            // Accélération due aux pédales
+            let pedal_accel = physics.accelerator * physics.max_acceleration;
+            let pedal_brake = physics.brake * physics.max_braking;
+
+            // Sens de l'idle_speed : en Drive, idle_speed > 0, donc on tend vers l'avant
+            // en Reverse, idle_speed < 0, on tend vers l'arrière
+            // L'accélérateur augmente la vitesse vers le sens de l'idle_speed
+            // Le frein ramène la vitesse vers 0.
+
+            // Si ni accélérateur ni frein n'est activé, on tend vers idle_speed
+            if physics.accelerator == 0.0 && physics.brake == 0.0 {
+                let diff = idle_speed - physics.speed;
+                // Appliquer une petite force pour tendre vers idle_speed
+                // On peut par exemple faire un diff * kp avec kp = 1.0
+                accel = diff;
             } else {
-                // Vitesse déjà à idle_speed, pas d'accélération
-                accel = 0.0;
+                // On a soit accélérateur, soit frein (ou les deux)
+                // L'accélérateur pousse la vitesse vers idle_speed+ si drive, idle_speed- si reverse
+                let direction = if physics.mode == TransmissionMode::Drive { 1.0 } else { -1.0 };
+
+                // L'accélérateur ajoute de la vitesse dans le sens direction
+                accel += pedal_accel * direction;
+
+                // Le frein ramène la vitesse vers 0
+                // Si la vitesse est positive et on freine, on applique accel négative
+                // Si la vitesse est négative et on freine, on applique accel positive vers 0
+                let brake_direction = if physics.speed > 0.0 { -1.0 } else if physics.speed < 0.0 { 1.0 } else { 0.0 };
+                accel += pedal_brake * brake_direction;
+            }
+
+            // Mise à jour de la vitesse
+            physics.speed += accel * dt;
+
+            // On limite la vitesse
+            // En mode Drive, on ne veut pas de vitesse négative ?
+            // On peut autoriser une petite marge, mais logiquement en Drive on ne recule pas si on accélère pas
+            // On va clamp la vitesse dans tous les cas entre -max_speed et max_speed
+            if physics.speed > physics.max_speed {
+                physics.speed = physics.max_speed;
+            } else if physics.speed < -physics.max_speed {
+                physics.speed = -physics.max_speed;
             }
         }
 
-        // Mise à jour de la vitesse
-        physics.speed += accel * dt;
-        if physics.speed < 0.0 {
-            physics.speed = 0.0;
-        }
-
         // Mise à jour position et orientation
-        let yaw_rate = if physics.steering_angle.abs() > 1e-6 {
-            (physics.speed / physics.wheelbase) * physics.steering_angle.tan()
+        if physics.mode == TransmissionMode::Park {
+            // Pas de déplacement
         } else {
-            0.0
-        };
+            let yaw_rate = if physics.steering_angle.abs() > 1e-6 {
+                (physics.speed / physics.wheelbase) * physics.steering_angle.tan()
+            } else {
+                0.0
+            };
 
-        physics.heading += yaw_rate * dt;
-        let dx = physics.speed * physics.heading.cos() * dt;
-        let dy = physics.speed * physics.heading.sin() * dt;
+            physics.heading += yaw_rate * dt;
+            let dx = physics.speed * physics.heading.cos() * dt;
+            let dy = physics.speed * physics.heading.sin() * dt;
 
-        transform.translation.x += dx;
-        transform.translation.y += dy;
-        transform.rotation = Quat::from_rotation_z(physics.heading);
+            transform.translation.x += dx;
+            transform.translation.y += dy;
+            transform.rotation = Quat::from_rotation_z(physics.heading);
+        }
     }
 }
 
@@ -92,18 +145,28 @@ fn control_car(
     let dt = time.delta_secs();
 
     for mut physics in query.iter_mut() {
+        // Changement de mode
+        if keyboard_input.just_pressed(KeyCode::KeyP) {
+            physics.mode = TransmissionMode::Park;
+        }
+        if keyboard_input.just_pressed(KeyCode::KeyD) {
+            physics.mode = TransmissionMode::Drive;
+        }
+        if keyboard_input.just_pressed(KeyCode::KeyR) {
+            physics.mode = TransmissionMode::Reverse;
+        }
+
         // Déterminer la cible pour l'accélérateur et le frein
+        // Flèche Haut = accélérateur, Flèche Bas = frein
         let accel_target = if keyboard_input.pressed(KeyCode::ArrowUp) { 1.0 } else { 0.0 };
         let brake_target = if keyboard_input.pressed(KeyCode::ArrowDown) { 1.0 } else { 0.0 };
 
         // Mettre à jour l'accélérateur
         if accel_target > physics.accelerator {
-            // On augmente l'accélérateur vers la cible
             let diff = accel_target - physics.accelerator;
             let max_change = physics.accel_ramp_up * dt;
             physics.accelerator += diff.min(max_change);
         } else {
-            // On diminue l'accélérateur vers la cible
             let diff = physics.accelerator - accel_target;
             let max_change = physics.accel_ramp_down * dt;
             physics.accelerator -= diff.min(max_change);
@@ -120,13 +183,15 @@ fn control_car(
             physics.brake -= diff.min(max_change);
         }
 
-        // Direction
+        // Direction (inchangé)
         let mut steering_target = physics.target_steering_angle;
-        if keyboard_input.pressed(KeyCode::ArrowLeft) {
-            steering_target -= 0.1 * dt;
-        }
         if keyboard_input.pressed(KeyCode::ArrowRight) {
-            steering_target += 0.1 * dt;
+            let steering_speed = 0.1 * (1.0 / (1.0 + physics.speed.abs() / physics.max_speed)); // Réduit à haute vitesse
+            steering_target -= steering_speed * dt;
+        }
+        if keyboard_input.pressed(KeyCode::ArrowLeft) {
+            let steering_speed = 0.1 * (1.0 / (1.0 + physics.speed.abs() / physics.max_speed));
+            steering_target += steering_speed * dt;
         }
 
         if steering_target > physics.max_steering_angle {
@@ -152,23 +217,27 @@ fn spawn_car(
             heading: 0.0,
             steering_angle: 0.0,
             target_steering_angle: 0.0,
-            max_steering_angle: 0.5,
-            steering_angle_speed: 1.0,
+            max_steering_angle: 0.05,
+            steering_angle_speed: 3.0,
 
-            max_speed: 20.0,
+            max_speed: 125.0,
             wheelbase: 2.5,
 
             accelerator: 0.0,
             brake: 0.0,
-            idle_speed: 1.0,
 
-            accel_ramp_up: 0.5,
-            accel_ramp_down: 1.0,
-            brake_ramp_up: 1.0,
+            accel_ramp_up: 5.0,
+            accel_ramp_down: 5.0,
+            brake_ramp_up: 15.0,
             brake_ramp_down: 1.5,
 
-            max_acceleration: 4.0,
-            max_braking: 5.0,
+            max_acceleration: 40.0,
+            max_braking: 50.0,
+
+            mode: TransmissionMode::Park,
+
+            idle_speed_forward: 1.0,
+            idle_speed_reverse: -1.0,
         },
     ));
 }
