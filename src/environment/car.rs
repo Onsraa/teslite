@@ -2,6 +2,7 @@ use bevy::{prelude::*, render::primitives::Aabb};
 
 const ACCELERATION_VALUE: f32 = 5.0;
 const ROTATION_VALUE: f32 = 5.0;
+const BRAKE_COEFFICIENT: f32 = 3.0;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TransmissionMode {
@@ -81,7 +82,9 @@ fn update_car_physics(
             physics.speed = 0.0;
         } else {
             let pedal_accel = physics.accelerator * physics.max_acceleration;
-            let pedal_brake = physics.brake * physics.max_braking;
+
+            let brake_intensity = 1.0 - (- BRAKE_COEFFICIENT * physics.brake).exp();
+            let pedal_brake = brake_intensity * physics.max_braking;
 
             if physics.accelerator == 0.0 && physics.brake == 0.0 {
                 // Tendre vers idle_speed
@@ -222,10 +225,10 @@ fn spawn_car(
             accel_ramp_up: 8.0,
             accel_ramp_down: 8.0,
             brake_ramp_up: 40.0,
-            brake_ramp_down: 40.0,
+            brake_ramp_down: 10.0,
 
             max_acceleration: 80.0,
-            max_braking: 200.0,
+            max_braking: 300.0,
 
             mode: TransmissionMode::Park,
 
