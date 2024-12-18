@@ -1,5 +1,5 @@
 use bevy::{color::palettes::css::*, prelude::*};
-use crate::environment::car::CarPhysics;
+use crate::environment::car::{CarPhysics, TransmissionMode};
 
 #[derive(Resource)]
 struct HudCar {
@@ -7,6 +7,7 @@ struct HudCar {
     pub brake_bar: Entity,
     pub angle_text: Entity,
     pub speed_text: Entity,
+    pub transmission_mode_text: Entity,
 }
 
 pub struct UIPlugin;
@@ -32,8 +33,8 @@ fn setup_ui(
         width: Val::Px(300.0),
         height: Val::Px(500.0),
         position_type: PositionType::Absolute,
-        left: Val::Percent(25.),
-        top: Val::Percent(25.),
+        left: Val::Px(25.0),
+        top: Val::Px(25.0),
         flex_direction: FlexDirection::Column,
         row_gap: Val::Px(5.0),
         ..default()
@@ -114,15 +115,27 @@ fn setup_ui(
         TextColor(Color::WHITE)
     )).id();
 
+    let transmission_mode_text = commands.spawn((
+        Text::new("Mode : Park"),
+        TextFont {
+            font: font.clone(),
+            font_size: 16.0,
+            ..default()
+        },
+        TextColor(Color::WHITE)
+    )).id();
+
     commands.entity(root).add_child(bars_container);
     commands.entity(root).add_child(angle_text);
     commands.entity(root).add_child(speed_text);
+    commands.entity(root).add_child(transmission_mode_text);
 
     commands.insert_resource(HudCar {
         accel_bar,
         brake_bar,
         angle_text,
         speed_text,
+        transmission_mode_text,
     });
 }
 
@@ -156,6 +169,15 @@ fn update_ui(
 
         if let Ok(mut speed_text) = q_text.get_mut(hud.speed_text) {
             speed_text.0 = format!("Speed : {:.2}", car.speed);
+        }
+
+        if let Ok(mut mode_text) = q_text.get_mut(hud.transmission_mode_text) {
+            let mode = match car.mode {
+                TransmissionMode::Park => "Park",
+                TransmissionMode::Drive => "Drive",
+                TransmissionMode::Reverse => "Reverse",
+            };
+            mode_text.0 = format!("Mode : {}", mode);
         }
     }
 }
