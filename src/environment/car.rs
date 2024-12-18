@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy::{prelude::*, render::primitives::Aabb};
 
 const ACCELERATION_VALUE: f32 = 5.0;
 const ROTATION_VALUE: f32 = 5.0;
@@ -24,6 +24,8 @@ pub struct CarPhysics {
     // Caractéristiques
     pub max_speed: f32,
     pub wheelbase: f32,
+    pub mass: f32,
+    pub tire_grip: f32,
 
     // Pédales
     pub accelerator: f32,        // entre 0 et 1
@@ -45,7 +47,16 @@ pub struct CarPhysics {
     pub idle_speed_reverse: f32,
 }
 
-fn update_car_physics(time: Res<Time>, mut query: Query<(&mut Transform, &mut CarPhysics)>) {
+#[derive(Resource)]
+pub struct SurfaceProperties {
+    pub friction_coefficient: f32,
+}
+
+fn update_car_physics(
+    time: Res<Time>,
+    mut query: Query<(&mut Transform, &mut CarPhysics)>,
+    surface: Res<SurfaceProperties>
+) {
     let dt = time.delta_secs();
     for (mut transform, mut physics) in query.iter_mut() {
         // Ajustement de l'angle de braquage
@@ -57,7 +68,6 @@ fn update_car_physics(time: Res<Time>, mut query: Query<(&mut Transform, &mut Ca
             physics.steering_angle += max_angle_change * angle_diff.signum();
         }
 
-        // Déterminer l'idle_speed actuel selon le mode
         let idle_speed = match physics.mode {
             TransmissionMode::Park => 0.0,
             TransmissionMode::Drive => physics.idle_speed_forward,
@@ -67,48 +77,30 @@ fn update_car_physics(time: Res<Time>, mut query: Query<(&mut Transform, &mut Ca
         let mut accel = 0.0;
 
         if physics.mode == TransmissionMode::Park {
-            // En mode Park, on force la voiture à s'arrêter
+            // Véhicule immobilisé
             physics.speed = 0.0;
-            accel = 0.0;
         } else {
-            // Mode Drive ou Reverse
-            // Accélération due aux pédales
             let pedal_accel = physics.accelerator * physics.max_acceleration;
             let pedal_brake = physics.brake * physics.max_braking;
 
-            // Sens de l'idle_speed : en Drive, idle_speed > 0, donc on tend vers l'avant
-            // en Reverse, idle_speed < 0, on tend vers l'arrière
-            // L'accélérateur augmente la vitesse vers le sens de l'idle_speed
-            // Le frein ramène la vitesse vers 0.
-
-            // Si ni accélérateur ni frein n'est activé, on tend vers idle_speed
             if physics.accelerator == 0.0 && physics.brake == 0.0 {
+                // Tendre vers idle_speed
                 let diff = idle_speed - physics.speed;
-                // Appliquer une petite force pour tendre vers idle_speed
-                // On peut par exemple faire un diff * kp avec kp = 1.0
                 accel = diff;
             } else {
-                // On a soit accélérateur, soit frein (ou les deux)
-                // L'accélérateur pousse la vitesse vers idle_speed+ si drive, idle_speed- si reverse
+                // Mode Drive ou Reverse
                 let direction = if physics.mode == TransmissionMode::Drive { 1.0 } else { -1.0 };
-
-                // L'accélérateur ajoute de la vitesse dans le sens direction
                 accel += pedal_accel * direction;
 
-                // Le frein ramène la vitesse vers 0
-                // Si la vitesse est positive et on freine, on applique accel négative
-                // Si la vitesse est négative et on freine, on applique accel positive vers 0
                 let brake_direction = if physics.speed > 0.0 { -1.0 } else if physics.speed < 0.0 { 1.0 } else { 0.0 };
                 accel += pedal_brake * brake_direction;
             }
 
-            // Mise à jour de la vitesse
-            physics.speed += accel * dt;
+            accel *= surface.friction_coefficient * physics.tire_grip;
 
-            // On limite la vitesse
-            // En mode Drive, on ne veut pas de vitesse négative ?
-            // On peut autoriser une petite marge, mais logiquement en Drive on ne recule pas si on accélère pas
-            // On va clamp la vitesse dans tous les cas entre -max_speed et max_speed
+            let actual_accel = accel / physics.mass;
+            physics.speed += actual_accel * dt;
+
             if physics.speed > physics.max_speed {
                 physics.speed = physics.max_speed;
             } else if physics.speed < -physics.max_speed {
@@ -116,10 +108,7 @@ fn update_car_physics(time: Res<Time>, mut query: Query<(&mut Transform, &mut Ca
             }
         }
 
-        // Mise à jour position et orientation
-        if physics.mode == TransmissionMode::Park {
-            // Pas de déplacement
-        } else {
+        if physics.mode != TransmissionMode::Park {
             let yaw_rate = if physics.steering_angle.abs() > 1e-6 {
                 (physics.speed / physics.wheelbase) * physics.steering_angle.tan()
             } else {
@@ -209,6 +198,7 @@ fn spawn_car(
     mut materials: ResMut<Assets<ColorMaterial>>
 ) {
     commands.spawn((
+        ShowAxes,
         Mesh2d(meshes.add(Rectangle::new(100.0, 50.0))),
         MeshMaterial2d(materials.add(Color::WHITE)),
         Transform::from_xyz(0.0, 0.0, 0.0),
@@ -218,26 +208,29 @@ fn spawn_car(
             steering_angle: 0.0,
             target_steering_angle: 0.0,
             max_steering_angle: 0.05,
-            steering_angle_speed: 3.0,
+            steering_angle_speed: 10.0,
 
-            max_speed: 125.0,
+            max_speed: 200.0,
             wheelbase: 2.5,
+
+            mass: 1.0,
+            tire_grip: 1.0,
 
             accelerator: 0.0,
             brake: 0.0,
 
-            accel_ramp_up: 5.0,
-            accel_ramp_down: 5.0,
-            brake_ramp_up: 15.0,
-            brake_ramp_down: 1.5,
+            accel_ramp_up: 8.0,
+            accel_ramp_down: 8.0,
+            brake_ramp_up: 40.0,
+            brake_ramp_down: 40.0,
 
-            max_acceleration: 40.0,
-            max_braking: 50.0,
+            max_acceleration: 80.0,
+            max_braking: 200.0,
 
             mode: TransmissionMode::Park,
 
-            idle_speed_forward: 1.0,
-            idle_speed_reverse: -1.0,
+            idle_speed_forward: 30.0,
+            idle_speed_reverse: -30.0,
         },
     ));
 }
@@ -246,14 +239,25 @@ fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2d);
 }
 
+#[derive(Component)]
+struct ShowAxes;
+
+fn draw_axes(mut gizmos: Gizmos, query: Query<(&Transform, &Aabb), With<ShowAxes>>) {
+    for (&transform, &aabb) in &query {
+        let length = aabb.half_extents.length();
+        gizmos.axes(transform, length);
+    }
+}
+
 pub struct CarPlugin;
 
 impl Plugin for CarPlugin {
     fn build(&self, app: &mut App) {
+        app.insert_resource(SurfaceProperties { friction_coefficient: 1.0 });
         app.add_systems(Startup, setup_camera);
         app.add_systems(Startup, spawn_car);
         app.add_systems(Update, control_car.before(update_car_physics));
-        app.add_systems(Update, update_car_physics);
+        app.add_systems(Update, (update_car_physics, draw_axes).chain());
     }
 }
 
