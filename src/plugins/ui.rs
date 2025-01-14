@@ -1,7 +1,7 @@
-use bevy::prelude::*;
 use crate::systems;
+use bevy::prelude::*;
 
-use systems::ui::car_driving_info::*;
+use systems::ui::drive_info::*;
 
 pub struct UIPlugin;
 

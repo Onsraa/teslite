@@ -6,6 +6,7 @@ use bevy::asset::AssetServer;
 use bevy::color::palettes::basic::{GREEN, RED};
 use bevy::color::Color;
 use bevy::prelude::*;
+use bevy::render::primitives::Aabb;
 
 pub fn setup_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
     let font = asset_server.load("fonts/FiraSans-Bold.ttf");
@@ -185,5 +186,12 @@ pub fn update_ui(
             };
             mode_text.0 = format!("Mode : {}", mode);
         }
+    }
+}
+
+pub fn draw_axes(mut gizmos: Gizmos, query: Query<(&Transform, &Aabb), With<crate::components::car::ShowAxes>>) {
+    for (&transform, &aabb) in &query {
+        let length = aabb.half_extents.length();
+        gizmos.axes(transform, length);
     }
 }
