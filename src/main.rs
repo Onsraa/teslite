@@ -1,10 +1,11 @@
-mod ui;
-use ui::UIPlugin;
-mod agent;
+mod components;
+mod params;
+mod plugins;
+mod resources;
+mod systems;
 
-mod environment;
-use environment::EnvironmentPlugin;
-
+use crate::plugins::environment_plugin::EnvironmentPlugin;
+use crate::plugins::ui_plugin::UIPlugin;
 use bevy::{
     core::FrameCount,
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
@@ -17,7 +18,7 @@ fn main() {
         .add_plugins((
             DefaultPlugins.set(WindowPlugin {
                 primary_window: Some(Window {
-                    title: "I am a window!".into(),
+                    title: "Teslite".into(),
                     name: Some("bevy.app".into()),
                     present_mode: PresentMode::AutoNoVsync,
                     mode: WindowMode::BorderlessFullscreen(MonitorSelection::Current),
@@ -33,7 +34,7 @@ fn main() {
             LogDiagnosticsPlugin::default(),
             FrameTimeDiagnosticsPlugin,
             EnvironmentPlugin,
-            UIPlugin
+            UIPlugin,
         ))
         .add_systems(Startup, setup)
         .add_systems(Update, (make_visible, exit_game))
@@ -50,10 +51,7 @@ fn make_visible(mut window: Single<&mut Window>, frames: Res<FrameCount>) {
     }
 }
 
-fn exit_game (
-    keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut app_exit_events: EventWriter<AppExit>,
-) {
+fn exit_game(keyboard_input: Res<ButtonInput<KeyCode>>, mut app_exit_events: EventWriter<AppExit>) {
     if keyboard_input.just_pressed(KeyCode::Escape) {
         app_exit_events.send(AppExit::Success);
     }

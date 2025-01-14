@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use super::car::get_car_plugin;
+use crate::components::car::get_car_plugin;
 
 pub struct EnvironmentPlugin;
 

@@ -53,7 +53,7 @@ pub struct SurfaceProperties {
     pub friction_coefficient: f32,
 }
 
-fn update_car_physics(
+pub fn update_car_physics(
     time: Res<Time>,
     mut query: Query<(&mut Transform, &mut CarPhysics)>,
     surface: Res<SurfaceProperties>
@@ -210,8 +210,8 @@ fn spawn_car(
             heading: 0.0,
             steering_angle: 0.0,
             target_steering_angle: 0.0,
-            max_steering_angle: 0.05,
-            steering_angle_speed: 10.0,
+            max_steering_angle: 0.02,
+            steering_angle_speed: 2.0,
 
             max_speed: 200.0,
             wheelbase: 2.5,
